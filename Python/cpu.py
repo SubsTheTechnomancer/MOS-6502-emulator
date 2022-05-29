@@ -18,8 +18,10 @@ st = np.uint8(0)
 # RAM of size 64KB
 ram = np.zeros(shape=(64000),dtype=np.uint8)
 
+# Flipped page
+flipped = 0
 # Cycles
-cycles = np.uint8(0)
+cycles = 0
 # Tickspeed
 tickspeed = 558.65922*10**(-9) # 1.79 MHz = 558.65922 ns, default for non-PAL
 
@@ -108,13 +110,131 @@ def nonmaskable_interrupt():
     set_flag('i',1)
     set_flag('b',1)
 
+# All Addressing Modes that require pc
+
+def zp():
+    # Zero page addressing
+    global pc
+    pc = np.uint8(pc+1)
+    addr = np.uint16(ram[pc-1])
+    return addr
+
+def zpx():
+    # Zero page with X register offset
+    global pc
+    pc = np.uint8(pc+1)
+    addr = np.uint16(ram[pc-1]+x)
+    return addr
+
+def zpy():
+    # Zero page with Y register offset
+    global pc
+    pc = np.uint8(pc+1)
+    addr = np.uint16(ram[pc-1]+y)
+    return addr
+
+def abs():
+    # Absolute addressing
+    global pc
+    lo,pc = ram[pc],np.uint8(pc+1)
+    hi,pc = ram[pc],np.uint8(pc+1)
+    addr = np.uint16((hi<<8)|lo)
+    return addr
+
+def absx():
+    # Absolute with X register offset
+    global pc,flipped
+    lo,pc = ram[pc],np.uint8(pc+1)
+    hi,pc = ram[pc],np.uint8(pc+1)
+    addr = np.uint16(((hi<<8)|lo)+x)
+    if hi < np.uint8((addr & 0xff00)>>8):
+        flipped = 1
+    return addr
+
+def absy():
+    # Absolute with Y register offset
+    global pc,flipped
+    lo,pc = ram[pc],np.uint8(pc+1)
+    hi,pc = ram[pc],np.uint8(pc+1)
+    addr = np.uint16(((hi<<8)|lo)+y)
+    if hi < np.uint8((addr & 0xff00)>>8):
+        flipped = 1
+    return addr
+
+def ind():
+    # Indirect addressing
+    global pc
+    lo,pc = ram[pc],np.uint8(pc+1)
+    hi,pc = ram[pc],np.uint8(pc+1)
+    addr = np.uint16((hi<<8)|lo)
+    return addr
+
+def idx():
+    # Indexed Indirect
+    global pc
+    offset,pc = ram[pc]+x,np.uint8(pc+1)
+    lo = ram[offset]
+    hi = ram[offset+1]
+    addr = np.uint16((hi<<8)|lo)
+    return addr
+
+def idy():
+    # Indirect Indexed
+    global pc
+    loloc,pc = ram[pc],np.uint8(pc+1)
+    lo = ram[loloc]
+    hi = ram[loloc+1]
+    addr = np.uint16(((hi<<8)|lo)+y)
+    if hi < np.uint8((addr & 0xff00)>>8):
+        flipped = 1
+    return addr
+
+##########################
+#   INSTRUCTIONS
+##########################
+# There are 255 slots, lots of them are unused.
+##########################
+
+#   OPCODE: $AD
+#   Instruction: LDA
+#   Addr Mode: abs
+
+opcode={
+    0x00 : '_00',
+    0x01 : '_01',
+    0xad : '_ad'
+}
+
+def _ad():
+    global a,cycles
+
+    addr = np.uint16(abs())
+    a = ram[addr]
+
+    cycles = 4
+    if(flipped):
+        cycles += 1
+    
+    set_flag('n',a&0x80)    # a is negative?
+    set_flag('z',(a==0))    # a is zero?
+
 
 def tick():
     global cycles
     while cycles != 0:
         print("Tick!")
         cycles -= 1
+        flipped = 0
         time.sleep(558.65922*10**(-9)) # Sleep for 1.79 MHz = 558.65922 nanoseconds
+
+def reset(vector):
+    global pc
+    pc = vector
+    while(1):
+        instr = np.uint8(ram[pc])
+        pc = np.uint8(pc+1)
+        opcode[instr]()
+        tick()
 
 def main():
     global tickspeed
